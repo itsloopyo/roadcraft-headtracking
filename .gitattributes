@@ -1,0 +1,13 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+# The mod writes HeadTracking.ini with CRLF. No .ini ships in the release ZIP -
+# the mod generates it on first run - but the tracked copy at the repo root is
+# the fixture config_defaults_tests byte-compares that generated text against,
+# so checking it out as LF would fail the suite on every clone.
+*.ini text eol=crlf
+*.dll binary
+*.asi binary
+*.zip binary
+*.gif binary

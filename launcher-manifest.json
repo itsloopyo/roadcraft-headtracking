@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "mod_info": {
+    "name": "RoadCraftHeadTracking",
+    "version": "0.0.0",
+    "game_id": "roadcraft"
+  },
+  "strategy": "AsiLoader",
+  "delivery_mode": "manifest",
+
+  "files": [
+    { "source": "vendor/ultimate-asi-loader/dinput8.dll", "target": "root/bin/pc/dinput8.dll", "backup": true },
+    { "source": "plugins/RoadCraftHeadTracking.asi", "target": "root/bin/pc/RoadCraftHeadTracking.asi" }
+  ],
+
+  "runtime_requirements": [],
+  "dependencies": []
+}
