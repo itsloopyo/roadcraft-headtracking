@@ -3,14 +3,14 @@
 
 // Boundary tests for the values HeadTracking.ini feeds into the camera path.
 
-#include "config_sanitize.h"
+#include "legacy_config/config_sanitize.h"
 
 #include "test_support.h"
 
 #include <cstdio>
 #include <limits>
 
-using namespace rc_ht;
+using namespace rc_ht::legacy;
 using rc_test::Check;
 
 namespace {

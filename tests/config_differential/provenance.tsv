@@ -1,0 +1,37 @@
+# What the differential test compares, and where each file came from.
+# Columns: role, source (commit:path, or the path in this repo), sha256 of the bytes.
+# v0.1.0 (commit 1368652, tag object 441f383) is the newest published build and the only one. The
+# repo publishes v* releases only, no dev pre-release, and no predecessor repo shipped this mod. It
+# pinned core b8d47eb. src/config.cpp, src/config.h, src/config_sanitize.h and src/logging.h are byte
+# for byte the same at v0.1.0 and at a5ca797, the commit the reader was frozen at, and every core
+# source either reader compiles holds the same bytes at b8d47eb and at the current pin, so
+# comparison 1 finds no difference.
+# v0.1.0's release ZIP and launcher-manifest.json shipped no HeadTracking.ini and seeded none: its
+# first start wrote it from kDefaultIniText in src/config.cpp. That text, extracted once, is the
+# first-run input. The repo's HeadTracking.ini has one committed version, 9eefc41, unchanged
+# through v0.1.0, and checked out with CRLF (.gitattributes *.ini eol=crlf) it holds the same bytes,
+# so it is the same input.
+published reader	v0.1.0:src/config.cpp	4df87edd1af8633895143b25c635547e25b245df383a090b548712ed88e942ee
+published reader	v0.1.0:src/config.h	8e41879e3f2dc29a3095c80e1f950ea611f54b301744a3b3590dcc057cf02dcf
+published reader	v0.1.0:src/config_sanitize.h	f31557b0f4cbe7283b814fe4e30a5d0152e3fb735a9f6fdad30ad1231f827077
+published reader	v0.1.0:src/logging.h	998b401b301041e8a6c7660246a13fce95aa6d60ecdf4c808ea55f5bb16b0cc3
+published startup code	v0.1.0:src/headtracking_mod.cpp, transcribed in tests/config_differential/oracle/oracle_reader.cpp	48488de01e70b84fa9652a0d8bfd9417583fcc6e6fb26d1e93ba394c952eca9b
+published core source	cameraunlock-core b8d47eb:cpp/include/cameraunlock/config/ini_reader.h	a7ffb44210ff59672fa97e8e5feaa2cb3e81938fcc0334a384c68bc371b3857a
+published core source	cameraunlock-core b8d47eb:cpp/src/config/ini_reader.cpp	e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c
+published core source	cameraunlock-core b8d47eb:cpp/include/cameraunlock/protocol/port_utils.h	91bff564d5e279b66527ec5553afcf4d591812dab0e78f71a48ef412e4db7a44
+published core source	cameraunlock-core b8d47eb:cpp/include/cameraunlock/math/smoothing_utils.h	fc2146f8c585e5f610c7234e302f59de4945679cfa28ff479ca47477ec073f22
+published core source	cameraunlock-core b8d47eb:cpp/include/cameraunlock/math/angle_utils.h	d7a905270933e3cb0c4c361d29d3fd701655498cbcd1875ea79d180468bdbe6a
+published core source	cameraunlock-core b8d47eb:cpp/include/cameraunlock/data/position_settings.h	b24dceb8e25475aebc5a468a5c7362a4a4e64204d183d1408525345f32f547f5
+published core source	cameraunlock-core b8d47eb:cpp/include/cameraunlock/logging/file_log.h	43bdd2ef8554c78e5f440333463750c13b95110fe672b0b6e273244df9e7d169
+published core source	cameraunlock-core b8d47eb:cpp/src/logging/file_log.cpp	73c53c2baa06bbfebe8211f62678aa2b60cb95f604743d3686951ba56b87ea47
+frozen from	a5ca797:src/config.cpp	4df87edd1af8633895143b25c635547e25b245df383a090b548712ed88e942ee
+frozen from	a5ca797:src/config.h	8e41879e3f2dc29a3095c80e1f950ea611f54b301744a3b3590dcc057cf02dcf
+frozen from	a5ca797:src/config_sanitize.h	f31557b0f4cbe7283b814fe4e30a5d0152e3fb735a9f6fdad30ad1231f827077
+frozen reader	src/legacy_config/legacy_config.h	b07878a612b46417924bfdd40774ced69a9bb79c7b1239cabc847f59a0229a7f
+frozen reader	src/legacy_config/legacy_config.cpp	a7febe14df10f84a7b63d65fdf376ef71170bcc7107b1ef96efa3c9ab96f1560
+frozen reader	src/legacy_config/config_sanitize.h	7605121eddc3a59fb228cd56711f852aa570a4f7d24a0b34288653a695bddaeb
+oracle copy	tests/config_differential/oracle/src/config.cpp	4df87edd1af8633895143b25c635547e25b245df383a090b548712ed88e942ee
+oracle copy	tests/config_differential/oracle/src/config.h	8e41879e3f2dc29a3095c80e1f950ea611f54b301744a3b3590dcc057cf02dcf
+oracle copy	tests/config_differential/oracle/src/config_sanitize.h	f31557b0f4cbe7283b814fe4e30a5d0152e3fb735a9f6fdad30ad1231f827077
+oracle copy	tests/config_differential/oracle/src/logging.h	998b401b301041e8a6c7660246a13fce95aa6d60ecdf4c808ea55f5bb16b0cc3
+input	kDefaultIniText at v0.1.0, what its first start wrote, and 9eefc41:HeadTracking.ini: data/firstrun-v0.1.0.ini	e46c0f183954641a2de400db034e5c3ef7e4ab4a9ba1c5bee04bc903d78f1517

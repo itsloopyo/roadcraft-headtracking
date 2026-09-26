@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 itsloopyo
 
+// The hotkey half of the frozen v0.1.0 HeadTracking.ini loader in
+// src/legacy_config/.
+//
 // The nav cluster is prime real estate on a sim rig - a button box, a wheel
 // plugin or the game's own binds may already be sitting on Home or Page Up - so
 // both halves of every action are remappable. What matters at this boundary is
@@ -8,7 +11,7 @@
 // rather than on nothing, which is the difference between one hotkey not moving
 // and a hotkey silently disappearing.
 
-#include "config.h"
+#include "legacy_config/legacy_config.h"
 
 #include "ini_fixture.h"
 #include "test_support.h"
@@ -16,7 +19,7 @@
 #include <cstdio>
 #include <string>
 
-using namespace rc_ht;
+using namespace rc_ht::legacy;
 using rc_test::Check;
 
 namespace {
@@ -29,7 +32,7 @@ Config Load(const char* body) {
     if (!rc_test::WriteIni(g_dir, body)) return Config{};
 
     Config cfg;
-    LoadConfig(g_dir, cfg);
+    LoadConfig(rc_test::IniPathIn(g_dir), cfg);
     return cfg;
 }
 

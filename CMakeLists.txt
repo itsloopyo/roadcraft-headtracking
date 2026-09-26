@@ -22,6 +22,7 @@ set(MOD_SOURCES
     src/dllmain.cpp
     src/headtracking_mod.cpp
     src/config.cpp
+    src/legacy_config/legacy_config.cpp
     src/camera_fov.cpp
     src/camera_hook.cpp
     src/camera_transform.cpp
@@ -83,6 +84,7 @@ if(RC_BUILD_TESTS)
         set_property(GLOBAL APPEND PROPERTY RC_TEST_TARGETS ${target})
     endfunction()
 
+    # The frozen reader's value guards - headers only, nothing to link.
     rc_add_test(config_sanitize)
 
     # The camera composition compiled from the production translation unit:
@@ -100,19 +102,85 @@ if(RC_BUILD_TESTS)
 
     rc_add_test(hotkey_names src/hotkey_names.cpp)
 
-    rc_add_test(config_defaults src/config.cpp)
+    rc_add_test(config_defaults src/config.cpp src/legacy_config/legacy_config.cpp)
     target_link_libraries(rc_config_defaults_tests PRIVATE cameraunlock)
     target_compile_definitions(rc_config_defaults_tests PRIVATE
         RC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-    rc_add_test(config_hotkeys src/config.cpp)
+    # The hotkey half of the frozen loader: which INI values reach a binding and
+    # which leave the action on the key it already had.
+    rc_add_test(config_hotkeys src/legacy_config/legacy_config.cpp)
     target_link_libraries(rc_config_hotkeys_tests PRIVATE cameraunlock)
 
     # The port, the smoothing pair, the position limits and the flags, read
-    # through the real loader: what each key does with a trailing comment, a
+    # through the frozen loader: what each key does with a trailing comment, a
     # comma decimal, a value out of range and a NaN.
-    rc_add_test(config_values src/config.cpp)
+    rc_add_test(config_values src/legacy_config/legacy_config.cpp)
     target_link_libraries(rc_config_values_tests PRIVATE cameraunlock)
+
+    # The canonical config conversion's differential test: v0.1.0's reader and
+    # startup code (the oracle, compiled from byte copies in
+    # tests/config_differential/oracle) against the frozen reader in
+    # src/legacy_config/.
+    set(RC_DIFFERENTIAL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential)
+    add_executable(rc_config_differential
+        ${RC_DIFFERENTIAL_DIR}/differential_tests.cpp
+        ${RC_DIFFERENTIAL_DIR}/oracle/oracle_reader.cpp
+        src/legacy_config/legacy_config.cpp
+    )
+    target_include_directories(rc_config_differential PRIVATE
+        src
+        ${RC_DIFFERENTIAL_DIR}
+        cameraunlock-core/cpp/include
+    )
+    target_compile_definitions(rc_config_differential PRIVATE
+        RC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(rc_config_differential PRIVATE cameraunlock)
+    set_target_properties(rc_config_differential PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
+    if(MSVC)
+        target_compile_options(rc_config_differential PRIVATE /WX /EHsc /bigobj)
+    endif()
+    add_test(NAME config_differential COMMAND rc_config_differential)
+    set_property(GLOBAL APPEND PROPERTY RC_TEST_TARGETS rc_config_differential)
+
+    # What the differential test compiles is pinned by hash, line endings aside:
+    # the oracle's byte copies must stay v0.1.0's (git show v0.1.0:src/<file>),
+    # the core sources both readers compile must stay the ones v0.1.0 was built
+    # with (core b8d47eb), and the frozen reader is never edited.
+    function(rc_require_hash path expected)
+        file(READ "${path}" text)
+        string(REPLACE "\r" "" text "${text}")
+        string(SHA256 actual "${text}")
+        if(NOT actual STREQUAL expected)
+            message(FATAL_ERROR "${path} has changed (SHA-256 of its text ${actual}, pinned "
+                                "${expected}). The config differential test compares against "
+                                "exactly this file; see CMakeLists.txt.")
+        endif()
+    endfunction()
+    set(RC_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cameraunlock-core/cpp)
+    foreach(pinned
+            "${RC_DIFFERENTIAL_DIR}/oracle/src/config.cpp|4df87edd1af8633895143b25c635547e25b245df383a090b548712ed88e942ee"
+            "${RC_DIFFERENTIAL_DIR}/oracle/src/config.h|8e41879e3f2dc29a3095c80e1f950ea611f54b301744a3b3590dcc057cf02dcf"
+            "${RC_DIFFERENTIAL_DIR}/oracle/src/config_sanitize.h|f31557b0f4cbe7283b814fe4e30a5d0152e3fb735a9f6fdad30ad1231f827077"
+            "${RC_DIFFERENTIAL_DIR}/oracle/src/logging.h|998b401b301041e8a6c7660246a13fce95aa6d60ecdf4c808ea55f5bb16b0cc3"
+            "${RC_CORE_DIR}/include/cameraunlock/config/ini_reader.h|a7ffb44210ff59672fa97e8e5feaa2cb3e81938fcc0334a384c68bc371b3857a"
+            "${RC_CORE_DIR}/src/config/ini_reader.cpp|e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c"
+            "${RC_CORE_DIR}/include/cameraunlock/protocol/port_utils.h|91bff564d5e279b66527ec5553afcf4d591812dab0e78f71a48ef412e4db7a44"
+            "${RC_CORE_DIR}/include/cameraunlock/math/smoothing_utils.h|fc2146f8c585e5f610c7234e302f59de4945679cfa28ff479ca47477ec073f22"
+            "${RC_CORE_DIR}/include/cameraunlock/math/angle_utils.h|d7a905270933e3cb0c4c361d29d3fd701655498cbcd1875ea79d180468bdbe6a"
+            "${RC_CORE_DIR}/include/cameraunlock/data/position_settings.h|b24dceb8e25475aebc5a468a5c7362a4a4e64204d183d1408525345f32f547f5"
+            "${RC_CORE_DIR}/include/cameraunlock/logging/file_log.h|43bdd2ef8554c78e5f440333463750c13b95110fe672b0b6e273244df9e7d169"
+            "${RC_CORE_DIR}/src/logging/file_log.cpp|73c53c2baa06bbfebe8211f62678aa2b60cb95f604743d3686951ba56b87ea47"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/legacy_config/legacy_config.h|b07878a612b46417924bfdd40774ced69a9bb79c7b1239cabc847f59a0229a7f"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/legacy_config/legacy_config.cpp|a7febe14df10f84a7b63d65fdf376ef71170bcc7107b1ef96efa3c9ab96f1560"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/legacy_config/config_sanitize.h|7605121eddc3a59fb228cd56711f852aa570a4f7d24a0b34288653a695bddaeb")
+        string(REPLACE "|" ";" pair "${pinned}")
+        list(GET pair 0 pinned_path)
+        list(GET pair 1 pinned_hash)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${pinned_path}")
+        rc_require_hash("${pinned_path}" "${pinned_hash}")
+    endforeach()
 
     # Live sockets: binds the port, holds it, releases it, and times the
     # receiver's recovery. Slower than the rest of the suite by design.

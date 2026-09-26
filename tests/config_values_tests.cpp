@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 itsloopyo
 
-// The numeric and boolean half of HeadTracking.ini, read through the real
-// loader. Windows' INI reader hands back everything after the '=' including an
+// The numeric and boolean half of HeadTracking.ini, read through the frozen
+// v0.1.0 loader in src/legacy_config/. Windows' INI reader hands back
+// everything after the '=' including an
 // inline comment, so what each key does with that trailing text is a boundary
 // decision a user hits the first time they annotate their own file - and it
 // differs between the number keys and the flag keys. The hotkey half has its
 // own suite; this covers the port, the two smoothing values, the position
 // limits and the flags.
 
-#include "config.h"
+#include "legacy_config/legacy_config.h"
 
 #include "ini_fixture.h"
 #include "test_support.h"
@@ -17,7 +18,7 @@
 #include <cstdio>
 #include <string>
 
-using namespace rc_ht;
+using namespace rc_ht::legacy;
 using rc_test::Check;
 using rc_test::CheckClose;
 
@@ -30,7 +31,7 @@ Config Load(const char* body) {
     if (!rc_test::WriteIni(g_dir, body)) return Config{};
 
     Config cfg;
-    LoadConfig(g_dir, cfg);
+    LoadConfig(rc_test::IniPathIn(g_dir), cfg);
     return cfg;
 }
 
@@ -44,7 +45,7 @@ Config LoadOverPoisoned(const char* body) {
     cfg.local_smoothing = 0.99f;
     cfg.remote_smoothing = 0.99f;
     cfg.limit_x = 0.45f;
-    LoadConfig(g_dir, cfg);
+    LoadConfig(rc_test::IniPathIn(g_dir), cfg);
     return cfg;
 }
 
@@ -167,7 +168,8 @@ void MissingFileTests() {
     std::printf("No file at all\n");
     Config cfg;
     cfg.udp_port = 5555;
-    LoadConfig(g_dir + "\\does-not-exist", cfg);
+    Check(!LoadConfig(rc_test::IniPathIn(g_dir + "\\does-not-exist"), cfg),
+          "a file that is not there reports that it did not open");
     Check(cfg.udp_port == 5555, "an unreadable directory leaves the Config untouched");
 }
 
