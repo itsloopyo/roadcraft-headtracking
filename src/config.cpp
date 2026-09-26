@@ -3,127 +3,157 @@
 
 #include "config.h"
 
-#include <windows.h>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "legacy_config/legacy_config.h"
 #include "logging.h"
 
-namespace rc_ht {
+#include "cameraunlock/input/key_bindings.h"
+
+namespace rc_ht::config {
 
 namespace {
 
-constexpr char kIniName[] = "HeadTracking.ini";
+namespace cfg = ::cameraunlock::config;
+using cfg::schema::Concept;
+using ::cameraunlock::input::FormatKeyBindings;
+using ::cameraunlock::input::KeyModifiers;
 
-// Values here must stay in step with the Config member initialisers; the
-// config_defaults test generates this file and loads it back over a poisoned
-// Config to hold the two together.
-constexpr char kDefaultIniText[] =
-    "; RoadCraft Head Tracking - configuration\r\n"
-    "; Edit values, restart the game to apply.\r\n"
-    ";\r\n"
-    "; Controls (remappable, see [Hotkeys]):\r\n"
-    ";   End  / Ctrl+Shift+Y   toggle tracking\r\n"
-    ";   PgUp / Ctrl+Shift+G   cycle tracking mode (rotation and position\r\n"
-    ";                         / rotation only / position only)\r\n"
-    ";\r\n"
-    "; Centre, sensitivity, curves and axis inversion belong in your tracker\r\n"
-    "; (OpenTrack, the phone app), so one profile works the same in every game.\r\n\r\n"
-    "[Network]\r\n"
-    "UdpPort=4242\r\n\r\n"
-    "[General]\r\n"
-    "EnableOnStartup=1\r\n\r\n"
-    "[Hotkeys]\r\n"
-    "; Windows virtual key codes, in hex. Each action has a nav-cluster key and a\r\n"
-    "; Ctrl+Shift+<key> chord, and both fire it.\r\n"
-    "; Common codes: End 0x23, Insert 0x2D, Delete 0x2E, PgUp 0x21,\r\n"
-    "; PgDn 0x22, F1-F12 0x70-0x7B, A-Z 0x41-0x5A.\r\n"
-    "ToggleKey=0x23\r\n"
-    "CycleModeKey=0x21\r\n"
-    "ChordToggleKey=0x59\r\n"
-    "ChordCycleModeKey=0x47\r\n\r\n"
-    "[Smoothing]\r\n"
-    "; 0.0 none .. 1.0 heavy. Covers rotation and position. LocalSmoothing applies\r\n"
-    "; to a tracker sending to 127.0.0.1; RemoteSmoothing to anything arriving over\r\n"
-    "; the network, including this PC's own LAN address.\r\n"
-    "LocalSmoothing=0.0\r\n"
-    "RemoteSmoothing=0.15\r\n\r\n"
-    "[Position]\r\n"
-    "Enabled=1\r\n"
-    "; How far the head may move the camera, in metres, 0 to 0.5. LimitZ is leaning\r\n"
-    "; forward and LimitZBack is leaning away; LimitY is up and LimitYDown is down.\r\n"
-    "LimitX=0.30\r\n"
-    "LimitY=0.20\r\n"
-    "LimitYDown=0.20\r\n"
-    "LimitZ=0.40\r\n"
-    "LimitZBack=0.10\r\n";
+constexpr const wchar_t* kIniName = L"CameraUnlock.ini";
+constexpr const wchar_t* kLegacyIniName = L"HeadTracking.ini";
 
-std::string IniPath(const std::string& exe_dir) {
-    return exe_dir + "\\" + kIniName;
+// data/games.json's display_name for roadcraft.
+constexpr const char* kDisplayName = "RoadCraft";
+
+constexpr KeyModifiers kChord = KeyModifiers::kCtrl | KeyModifiers::kShift;
+
+std::unique_ptr<cfg::ConfigOwner<Config>> g_owner;
+
+cfg::ImportResult RunImport(const cfg::LegacyInput& input, Config& out) {
+    legacy::Config read;
+    const bool present = legacy::LoadConfig(input.ansi_path, read);
+
+    // The reader keeps the port inside 1024-65535, each smoothing value finite
+    // and inside 0-1 and each limit finite and inside 0-0.5, so all of them
+    // carry over as they are. It had no sensitivity, inversion or reticle
+    // setting, so nothing is dropped.
+    out.udp_port = read.udp_port;
+    out.enable_on_startup = read.enable_on_startup;
+    out.local_smoothing = read.local_smoothing;
+    out.remote_smoothing = read.remote_smoothing;
+
+    // [Position] Enabled chose the startup mode and nothing else: the cycle
+    // reached every mode either way.
+    const cameraunlock::TrackingModeChannels channels = cameraunlock::EncodeTrackingMode(
+        read.position_enabled ? cameraunlock::TrackingMode::RotationAndPosition
+                              : cameraunlock::TrackingMode::RotationOnly);
+    out.rotation_enabled = channels.rotation_enabled;
+    out.position_enabled = channels.position_enabled;
+
+    out.position_limit_x = read.limit_x;
+    out.position_limit_y = read.limit_y;
+    out.position_limit_y_down = read.limit_y_down;
+    out.position_limit_z = read.limit_z;
+    out.position_limit_z_back = read.limit_z_back;
+
+    // Each action had a key that fired with Ctrl and Shift not both held and a
+    // chord key that fired only while both were. The reader keeps every code a
+    // bindable key from 0x07 to 0xFE, so the pair is always a list of two.
+    out.toggle_key = FormatKeyBindings({{KeyModifiers::kNone, read.toggle_key}, {kChord, read.chord_toggle_key}});
+    out.cycle_tracking_mode_key =
+        FormatKeyBindings({{KeyModifiers::kNone, read.cycle_mode_key}, {kChord, read.chord_cycle_mode_key}});
+
+    return present ? cfg::ImportResult::Imported({}) : cfg::ImportResult::Absent({});
 }
 
 }  // namespace
 
-void LoadConfig(const std::string& exe_dir, Config& out) {
-    legacy::Config read;
-    read.udp_port = out.udp_port;
-    read.enable_on_startup = out.enable_on_startup;
-    read.toggle_key = out.toggle_key;
-    read.cycle_mode_key = out.cycle_mode_key;
-    read.chord_toggle_key = out.chord_toggle_key;
-    read.chord_cycle_mode_key = out.chord_cycle_mode_key;
-    read.local_smoothing = out.local_smoothing;
-    read.remote_smoothing = out.remote_smoothing;
-    read.position_enabled = out.position_enabled;
-    read.limit_x = out.limit_x;
-    read.limit_y = out.limit_y;
-    read.limit_y_down = out.limit_y_down;
-    read.limit_z = out.limit_z;
-    read.limit_z_back = out.limit_z_back;
-
-    legacy::LoadConfig(IniPath(exe_dir), read);
-
-    out.udp_port = read.udp_port;
-    out.enable_on_startup = read.enable_on_startup;
-    out.toggle_key = read.toggle_key;
-    out.cycle_mode_key = read.cycle_mode_key;
-    out.chord_toggle_key = read.chord_toggle_key;
-    out.chord_cycle_mode_key = read.chord_cycle_mode_key;
-    out.local_smoothing = read.local_smoothing;
-    out.remote_smoothing = read.remote_smoothing;
-    out.position_enabled = read.position_enabled;
-    out.limit_x = read.limit_x;
-    out.limit_y = read.limit_y;
-    out.limit_y_down = read.limit_y_down;
-    out.limit_z = read.limit_z;
-    out.limit_z_back = read.limit_z_back;
+cfg::ConfigTable<Config> Table() {
+    cfg::ConfigTable<Config> table;
+    table.Concept<Concept::UdpPort>(&Config::udp_port)
+        .Concept<Concept::EnableOnStartup>(&Config::enable_on_startup)
+        .Concept<Concept::RotationEnabled>(&Config::rotation_enabled)
+        .Writable()
+        .Concept<Concept::LocalSmoothing>(&Config::local_smoothing)
+        .Concept<Concept::RemoteSmoothing>(&Config::remote_smoothing)
+        .Concept<Concept::PositionEnabled>(&Config::position_enabled)
+        .Writable()
+        .Concept<Concept::PositionLimitX>(&Config::position_limit_x)
+        .Concept<Concept::PositionLimitY>(&Config::position_limit_y)
+        .Concept<Concept::PositionLimitYDown>(&Config::position_limit_y_down)
+        .Concept<Concept::PositionLimitZ>(&Config::position_limit_z)
+        .Concept<Concept::PositionLimitZBack>(&Config::position_limit_z_back)
+        .Concept<Concept::ToggleKey>(&Config::toggle_key)
+        .Concept<Concept::CycleTrackingModeKey>(&Config::cycle_tracking_mode_key);
+    return table;
 }
 
-void WriteDefaultConfigIfMissing(const std::string& exe_dir) {
-    const std::string path = IniPath(exe_dir);
-
-    // CREATE_NEW, so a file written between a check and a truncating open is
-    // never overwritten.
-    const HANDLE file = CreateFileA(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
-                                    FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        const DWORD error = GetLastError();
-        if (error == ERROR_FILE_EXISTS) return;
-        Log::Line("[config] could not create %s (%lu) - the game directory is not writable. "
-                  "Built-in defaults are in use and edits there will not be read.",
-                  path.c_str(), error);
-        return;
-    }
-
-    constexpr DWORD kTextBytes = static_cast<DWORD>(sizeof(kDefaultIniText) - 1);
-    DWORD written = 0;
-    const BOOL ok = WriteFile(file, kDefaultIniText, kTextBytes, &written, nullptr);
-    const DWORD write_error = ok ? 0 : GetLastError();
-    CloseHandle(file);
-    if (!ok || written != kTextBytes) {
-        Log::Line("[config] %s was created but only %lu of %lu bytes could be written (%lu); "
-                  "delete it and restart the game for a complete default config.",
-                  path.c_str(), written, kTextBytes, write_error);
-    }
+cfg::RenderHeader Header() {
+    cfg::RenderHeader header;
+    header.display_name = kDisplayName;
+    return header;
 }
 
-}  // namespace rc_ht
+cfg::LegacyImport<Config> Import() {
+    cfg::LegacyImport<Config> import;
+    import.run = &RunImport;
+    for (const legacy::Key& key : legacy::ReadKeys()) import.keys.push_back({key.section, key.key});
+    return import;
+}
+
+cfg::ConfigOwnerOptions<Config> OwnerOptions(const std::filesystem::path& folder, cfg::DefaultsFile defaults) {
+    cfg::ConfigOwnerOptions<Config> options;
+    options.path = (folder / kIniName).wstring();
+    options.table = Table();
+    options.import = Import();
+    options.legacy_path = (folder / kLegacyIniName).wstring();
+    options.header = Header();
+    options.defaults = std::move(defaults);
+    return options;
+}
+
+Config Load(const std::filesystem::path& folder, cfg::DefaultsFile defaults) {
+    g_owner = std::make_unique<cfg::ConfigOwner<Config>>(OwnerOptions(folder, std::move(defaults)));
+    const cfg::ConfigLoadResult<Config> result = g_owner->Load();
+    for (const std::string& line : result.log) Log::Line("[config] %s", line.c_str());
+    if (!result.reason.empty()) Log::Line("[config] %s", result.reason.c_str());
+    Log::Line("[config] %s", cfg::ConfigLoadStatusName(result.status));
+    return result.config;
+}
+
+cameraunlock::TrackingMode StartupTrackingMode(const Config& config) {
+    const auto mode = cameraunlock::DecodeTrackingMode(config.rotation_enabled, config.position_enabled);
+    if (!mode) throw std::logic_error("RotationEnabled and PositionEnabled are both false, which the table never gives");
+    return *mode;
+}
+
+cameraunlock::PositionSettings ToPositionSettings(const Config& config) {
+    cameraunlock::PositionSettings position;
+    position.limit_x = config.position_limit_x;
+    position.limit_y = config.position_limit_y;
+    position.limit_y_down = config.position_limit_y_down;
+    position.limit_z = config.position_limit_z;
+    position.limit_z_back = config.position_limit_z_back;
+    position.local_smoothing = config.local_smoothing;
+    position.remote_smoothing = config.remote_smoothing;
+    return position;
+}
+
+void SaveTrackingMode(cameraunlock::TrackingMode mode) {
+    const cameraunlock::TrackingModeChannels channels = cameraunlock::EncodeTrackingMode(mode);
+    const cfg::ConfigSaveResult result = g_owner->Save([channels](Config& c) {
+        c.rotation_enabled = channels.rotation_enabled;
+        c.position_enabled = channels.position_enabled;
+    });
+    if (result.status != cfg::ConfigSaveStatus::Saved) {
+        Log::Line("[config] [General] RotationEnabled and [Position] PositionEnabled %s: %s",
+                  cfg::ConfigSaveStatusName(result.status), result.reason.c_str());
+    }
+    for (const std::string& line : result.log) Log::Line("[config] %s", line.c_str());
+}
+
+}  // namespace rc_ht::config

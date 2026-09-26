@@ -23,8 +23,9 @@ Import-Module (Join-Path $projectDir 'cameraunlock-core/powershell/DevDeploy.psm
 $loader = Join-Path $projectDir 'vendor/ultimate-asi-loader/dinput8.dll'
 if (-not (Test-Path $loader)) { throw "Vendored ASI loader missing. Run 'pixi run update-deps'." }
 
-# HeadTracking.ini is deliberately not deployed: it is the player's file, the
-# mod writes it itself when it is missing, and a dev loop that overwrote it
+# No config is deployed: CameraUnlock.ini is the player's file, the mod creates
+# it itself when it is missing (importing HeadTracking.ini, the file earlier
+# versions read, while it is absent), and a dev loop that overwrote either
 # would throw away whatever the current test is configured to do.
 #
 # Roadcraft - Retail.exe lives under root\bin\pc rather than the install root, and it

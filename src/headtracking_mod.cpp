@@ -5,12 +5,15 @@
 
 #include <windows.h>
 
-#include <array>
 #include <atomic>
 #include <cmath>
 #include <exception>
+#include <filesystem>
+#include <functional>
 #include <mutex>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "builds/build_registry.h"
 #include "camera_fov.h"
@@ -18,12 +21,13 @@
 #include "camera_transform.h"
 #include "config.h"
 #include "game_state.h"
-#include "hotkey_names.h"
 #include "logging.h"
 #include "window_centering.h"
 
-#include "cameraunlock/input/chord_hotkeys.h"
+#include "cameraunlock/config/defaults_file.h"
 #include "cameraunlock/input/hotkey_poller.h"
+#include "cameraunlock/input/key_binding_registration.h"
+#include "cameraunlock/input/key_bindings.h"
 #include "cameraunlock/math/smoothing_utils.h"
 #include "cameraunlock/os/module_paths.h"
 #include "cameraunlock/protocol/udp_receiver.h"
@@ -70,17 +74,8 @@ std::atomic<bool> g_pinned{false};
 void ApplyConfigToPipeline(const Config& config, Session& session) {
     session.SetLocalSmoothing(config.local_smoothing);
     session.SetRemoteSmoothing(config.remote_smoothing);
-
-    cameraunlock::PositionSettings position;
-    position.limit_x = config.limit_x;
-    position.limit_y = config.limit_y;
-    position.limit_y_down = config.limit_y_down;
-    position.limit_z = config.limit_z;
-    position.limit_z_back = config.limit_z_back;
-    session.SetPositionSettings(position);
-
-    session.SetMode(config.position_enabled ? cameraunlock::TrackingMode::RotationAndPosition
-                                            : cameraunlock::TrackingMode::RotationOnly);
+    session.SetPositionSettings(config::ToPositionSettings(config));
+    session.SetMode(config::StartupTrackingMode(config));
 }
 
 // ---------------------------------------------------------------------------
@@ -138,14 +133,15 @@ void ForgetFovBasesOnLevelLoad(bool loading) {
 // The configured travel limits, for the re-clamp after the zoom scaling. The
 // processor clamps the lean as its last step and the scaling then multiplies
 // what it handed back: at the widest frame this game renders that factor is
-// 1.1186, so a LimitX of 0.30 reaches the camera as 0.336 and the number the
+// 1.1186, so a PositionLimitX of 0.30 reaches the camera as 0.336 and the number the
 // player configured is not the number they get. Clamping last does cost the
 // compensation at the limit itself - a lean already at 0.30 is cut back from
 // 0.336 to 0.300, so its screen displacement is short by that factor - but a
 // limit that keeps the eye inside the cab is not a figure to round up.
 LeanLimits ConfiguredLeanLimits() {
-    return LeanLimits{ g_config.limit_x, g_config.limit_y, g_config.limit_y_down,
-                       g_config.limit_z, g_config.limit_z_back };
+    return LeanLimits{ g_config.position_limit_x, g_config.position_limit_y,
+                       g_config.position_limit_y_down, g_config.position_limit_z,
+                       g_config.position_limit_z_back };
 }
 
 // How far the composed pose is from identity when the gate opens or shuts: it
@@ -182,32 +178,37 @@ void ToggleTracking() {
     Log::Line("[input] tracking %s", on ? "enabled" : "disabled");
 }
 
-// Under the camera path's lock: CycleMode resets the position processor's
-// smoothing and the position interpolator, plain members a worker thread may be
-// inside Update() writing at the same moment.
-void CycleTrackingMode() {
-    const std::lock_guard<std::mutex> guard(CameraPathMutex());
-    const char* name = "";
-    switch (g_session.CycleMode()) {
-        case cameraunlock::TrackingMode::RotationAndPosition: name = "rotation and position"; break;
-        case cameraunlock::TrackingMode::RotationOnly:        name = "rotation only"; break;
-        case cameraunlock::TrackingMode::PositionOnly:        name = "position only"; break;
+const char* ModeName(cameraunlock::TrackingMode mode) {
+    switch (mode) {
+        case cameraunlock::TrackingMode::RotationAndPosition: return "rotation and position";
+        case cameraunlock::TrackingMode::RotationOnly:        return "rotation only";
+        case cameraunlock::TrackingMode::PositionOnly:        return "position only";
     }
-    Log::Line("[input] tracking mode: %s", name);
+    throw std::logic_error("TrackingMode outside its three modes");
 }
 
-struct HotkeyBinding {
-    const char* action;
-    int nav_key;
-    int chord_key;
-    void (*handler)();
-};
+// Runs on the hotkey poller's thread. The mode changes under the camera path's
+// lock, since CycleMode resets the position processor's smoothing and the
+// position interpolator, plain members a worker thread may be inside Update()
+// writing at the same moment. The save runs once the lock is released, so a
+// slow disk never holds up the camera path: the session has the new mode first,
+// then CameraUnlock.ini saves it, so the next start begins in it.
+void CycleTrackingMode() {
+    cameraunlock::TrackingMode mode;
+    {
+        const std::lock_guard<std::mutex> guard(CameraPathMutex());
+        mode = g_session.CycleMode();
+    }
+    Log::Line("[input] tracking mode: %s", ModeName(mode));
+    config::SaveTrackingMode(mode);
+}
 
-std::array<HotkeyBinding, 2> Bindings(const Config& config) {
-    return {{
-        { "toggle tracking",     config.toggle_key,     config.chord_toggle_key,     ToggleTracking },
-        { "cycle tracking mode", config.cycle_mode_key, config.chord_cycle_mode_key, CycleTrackingMode },
-    }};
+// The table's hotkey codec lets only a list ParseKeyBindings reads into the
+// settings.
+void RegisterList(const std::string& list, std::function<void()> action) {
+    const cameraunlock::input::KeyBindingsParseResult parsed = cameraunlock::input::ParseKeyBindings(list);
+    if (!parsed.ok()) throw std::logic_error("hotkey list '" + list + "': " + parsed.error);
+    cameraunlock::input::RegisterKeyBindings(g_hotkeys, parsed.bindings, std::move(action));
 }
 
 // HotkeyPoller::Start never returns false - it reports a thread it could not
@@ -217,11 +218,8 @@ std::array<HotkeyBinding, 2> Bindings(const Config& config) {
 // camera-hook line. Caught here, the mod keeps tracking on whatever
 // EnableOnStartup says and the log states that no key can change it.
 bool RegisterHotkeys(const Config& config) {
-    using namespace cameraunlock::input;
-    for (const HotkeyBinding& binding : Bindings(config)) {
-        g_hotkeys.AddHotkey(binding.nav_key, NavGuarded(binding.handler));
-        g_hotkeys.AddHotkey(binding.chord_key, ChordGuarded(binding.handler));
-    }
+    RegisterList(config.toggle_key, ToggleTracking);
+    RegisterList(config.cycle_tracking_mode_key, CycleTrackingMode);
     try {
         return g_hotkeys.Start();
     } catch (const std::exception& e) {
@@ -230,27 +228,20 @@ bool RegisterHotkeys(const Config& config) {
     }
 }
 
-void LogHotkeys(const Config& config) {
-    std::string ready = "[boot] ready.";
-    for (const HotkeyBinding& binding : Bindings(config)) {
-        ready += " " + HotkeyName(binding.nav_key) + "/Ctrl+Shift+"
-               + HotkeyName(binding.chord_key) + " " + binding.action + ",";
-    }
-    ready.back() = '.';
-    Log::Line("%s", ready.c_str());
-}
-
 // ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
 
-bool OpenLogAndResolveGameDirectory(std::string& exe_dir) {
-    const std::wstring exe_dir_wide = cameraunlock::os::HostExeDirectory();
+bool OpenLogAndResolveGameDirectory(std::wstring& exe_dir_wide, std::string& exe_dir) {
+    exe_dir_wide = cameraunlock::os::HostExeDirectory();
     Log::Open(exe_dir_wide.empty() ? std::wstring(L"HeadTracking.log")
                                    : exe_dir_wide + L"\\HeadTracking.log");
     Log::Line("=== RoadCraft Head Tracking v%s ===", RC_HT_VERSION);
 
-    // IniReader is ANSI-only, so a directory with no ANSI form is unusable.
+    // The log's lines take narrow text, and every earlier build stayed dormant
+    // on a directory with no ANSI form, since its HeadTracking.ini reader was
+    // ANSI-only. The frozen import of that file still is, so this stays as it
+    // was.
     if (exe_dir_wide.empty() || !cameraunlock::os::NarrowToAnsi(exe_dir_wide, exe_dir)) {
         Log::Line("[boot] could not resolve the game directory - mod is dormant, game runs vanilla.");
         return false;
@@ -259,15 +250,15 @@ bool OpenLogAndResolveGameDirectory(std::string& exe_dir) {
     return true;
 }
 
-void LoadAndApplyConfig(const std::string& exe_dir) {
-    WriteDefaultConfigIfMissing(exe_dir);
-    LoadConfig(exe_dir, g_config);
+void LoadAndApplyConfig(const std::wstring& exe_dir) {
+    g_config = config::Load(std::filesystem::path(exe_dir), cameraunlock::config::DefaultsFile::PerUser());
     Log::Line("[boot] config: port=%u enableOnStartup=%d localSmoothing=%.2f remoteSmoothing=%.2f "
-              "position=%d limits x=%.2f y=%.2f/%.2f z=%.2f/%.2f",
+              "mode=%s limits x=%.2f y=%.2f/%.2f z=%.2f/%.2f",
               static_cast<unsigned>(g_config.udp_port), g_config.enable_on_startup ? 1 : 0,
               g_config.local_smoothing, g_config.remote_smoothing,
-              g_config.position_enabled ? 1 : 0, g_config.limit_x, g_config.limit_y,
-              g_config.limit_y_down, g_config.limit_z, g_config.limit_z_back);
+              ModeName(config::StartupTrackingMode(g_config)), g_config.position_limit_x,
+              g_config.position_limit_y, g_config.position_limit_y_down, g_config.position_limit_z,
+              g_config.position_limit_z_back);
     ApplyConfigToPipeline(g_config, g_session);
     g_tracking_enabled.store(g_config.enable_on_startup);
 }
@@ -291,8 +282,9 @@ bool PinModule() {
 }
 
 void Bootstrap() {
+    std::wstring exe_dir_wide;
     std::string exe_dir;
-    if (!OpenLogAndResolveGameDirectory(exe_dir)) return;
+    if (!OpenLogAndResolveGameDirectory(exe_dir_wide, exe_dir)) return;
 
     if (!g_pinned.load()) {
         Log::Line("[boot] this module could not be pinned against unloading - mod is dormant, "
@@ -309,7 +301,7 @@ void Bootstrap() {
         return;
     }
 
-    LoadAndApplyConfig(exe_dir);
+    LoadAndApplyConfig(exe_dir_wide);
     StartReceiver();
 
     if (!InstallCameraHook()) {
@@ -321,7 +313,8 @@ void Bootstrap() {
     const bool hotkeys_live = RegisterHotkeys(g_config);
     g_active.store(true, std::memory_order_release);
     if (hotkeys_live) {
-        LogHotkeys(g_config);
+        Log::Line("[boot] ready. %s toggle tracking, %s cycle tracking mode.",
+                  g_config.toggle_key.c_str(), g_config.cycle_tracking_mode_key.c_str());
     } else {
         // The ready line names the keys and is the only place the log says what
         // they do, so printing it regardless would leave a player whose keys do
@@ -342,7 +335,7 @@ void Bootstrap() {
 // A CreateThread start routine has no handler above it, so anything that escapes
 // Bootstrap reaches UnhandledExceptionFilter and takes the game down with it -
 // over a mod that is only ever meant to fail dormant. Bootstrap allocates all
-// through: the config strings, the hotkey list, the ready line.
+// through: the config, the hotkey lists, the ready line.
 DWORD WINAPI BootstrapThread(LPVOID) {
     try {
         Bootstrap();

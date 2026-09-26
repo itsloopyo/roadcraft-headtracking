@@ -3,10 +3,9 @@
 
 #pragma once
 
-// The temp directory every config test drives LoadConfig against. The loader
-// takes a directory and finds HeadTracking.ini inside it, so a test cannot pass
-// it a file - it needs a directory of its own, per process, that nothing else
-// is writing into.
+// The temp directory every test of the frozen HeadTracking.ini loader writes its
+// file into: a directory of its own, per process, that nothing else is writing
+// into.
 
 #include "test_support.h"
 

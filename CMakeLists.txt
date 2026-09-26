@@ -27,7 +27,6 @@ set(MOD_SOURCES
     src/camera_hook.cpp
     src/camera_transform.cpp
     src/game_state.cpp
-    src/hotkey_names.cpp
     src/window_centering.cpp
     src/builds/build_registry.cpp
     src/builds/steam_offsets.cpp
@@ -100,11 +99,12 @@ if(RC_BUILD_TESTS)
                 src/builds/steam_offsets.cpp)
     target_link_libraries(rc_game_state_tests PRIVATE cameraunlock cameraunlock_hooks)
 
-    rc_add_test(hotkey_names src/hotkey_names.cpp)
-
-    rc_add_test(config_defaults src/config.cpp src/legacy_config/legacy_config.cpp)
-    target_link_libraries(rc_config_defaults_tests PRIVATE cameraunlock)
-    target_compile_definitions(rc_config_defaults_tests PRIVATE
+    # The committed config against the table's fresh render, the fleet's
+    # default hotkeys, and the mode cycle's save. `rc_config_tests
+    # --render-config <path>` is pixi run render-config.
+    rc_add_test(config src/config.cpp src/legacy_config/legacy_config.cpp)
+    target_link_libraries(rc_config_tests PRIVATE cameraunlock)
+    target_compile_definitions(rc_config_tests PRIVATE
         RC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
     # The hotkey half of the frozen loader: which INI values reach a binding and
@@ -121,11 +121,13 @@ if(RC_BUILD_TESTS)
     # The canonical config conversion's differential test: v0.1.0's reader and
     # startup code (the oracle, compiled from byte copies in
     # tests/config_differential/oracle) against the frozen reader in
-    # src/legacy_config/.
+    # src/legacy_config/, and that against the config owner's migration into
+    # CameraUnlock.ini.
     set(RC_DIFFERENTIAL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential)
     add_executable(rc_config_differential
         ${RC_DIFFERENTIAL_DIR}/differential_tests.cpp
         ${RC_DIFFERENTIAL_DIR}/oracle/oracle_reader.cpp
+        src/config.cpp
         src/legacy_config/legacy_config.cpp
     )
     target_include_directories(rc_config_differential PRIVATE
@@ -143,6 +145,12 @@ if(RC_BUILD_TESTS)
     endif()
     add_test(NAME config_differential COMMAND rc_config_differential)
     set_property(GLOBAL APPEND PROPERTY RC_TEST_TARGETS rc_config_differential)
+    # Core's canonical config lint over the committed file and every file the
+    # differential test migrated, which it writes beside itself under migrated/.
+    add_test(NAME config_lint COMMAND node
+             ${RC_DIFFERENTIAL_DIR}/lint-migrated.mjs
+             $<TARGET_FILE_DIR:rc_config_differential>/migrated)
+    set_tests_properties(config_lint PROPERTIES DEPENDS config_differential)
 
     # What the differential test compiles is pinned by hash, line endings aside:
     # the oracle's byte copies must stay v0.1.0's (git show v0.1.0:src/<file>),

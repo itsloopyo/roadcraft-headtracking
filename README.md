@@ -4,6 +4,8 @@
 
 An unofficial head tracking mod for RoadCraft that moves the camera with your head while your wheel or controller keeps steering, driven by a webcam, phone, or any OpenTrack compatible tracker, with no VR headset required.
 
+> **Updating from v0.1.0?** Settings now live in `CameraUnlock.ini`, next to `HeadTracking.ini` in `root\bin\pc`. The first start of this version reads your `HeadTracking.ini` into it and never changes `HeadTracking.ini` afterwards, so edit `CameraUnlock.ini` from then on. See [Configuration](#configuration).
+
 ## Features
 
 - **6DOF positional tracking** - lean, peek and duck with head position
@@ -33,7 +35,7 @@ The installer puts two files next to `Roadcraft - Retail.exe`: `RoadCraftHeadTra
 
 `Roadcraft - Retail.exe` is not at the top of the game folder. It lives in `root\bin\pc`, and that is where both files go. The loader only looks in the directory the exe is in, so a copy anywhere else does nothing.
 
-Success looks like a `HeadTracking.ini` and a `HeadTracking.log` appearing in `root\bin\pc` after the first launch, with the log reading `[build] activated profile steam-win64-20260902` and a `[camera] hooked Camera::SetTransform at ...` line.
+Success looks like a `CameraUnlock.ini`, the mod's settings file, and a `HeadTracking.log` appearing in `root\bin\pc` after the first launch, with the log reading `[build] activated profile steam-win64-20260902` and a `[camera] hooked Camera::SetTransform at ...` line.
 
 If the installer cannot find your game, point it at the folder yourself, either with an environment variable:
 
@@ -98,7 +100,7 @@ Two equivalent binding sets - use whichever your keyboard has:
 | Toggle tracking     | `End`       | `Ctrl+Shift+Y`  |
 | Cycle tracking mode | `Page Up`   | `Ctrl+Shift+G`  |
 
-Both columns fire the same action. All four keys are remappable in `[Hotkeys]`.
+Both columns fire the same action. Each action's keys are one list in `[Hotkeys]` in `CameraUnlock.ini`, `ToggleKey` and `CycleTrackingModeKey`, the chord included, so any of them can be changed or removed.
 
 `Page Up` / `Ctrl+Shift+G` cycles tracking mode:
 
@@ -107,46 +109,114 @@ Both columns fire the same action. All four keys are remappable in `[Hotkeys]`.
 3. Rotational tracking disabled, positional tracking enabled
 4. Back to normal
 
+The mode you pick is saved to `CameraUnlock.ini`, and the game starts in it next time. `End` / `Ctrl+Shift+Y` changes the current session only; whether tracking is on when the game starts is `EnableOnStartup`.
+
 Head tracking works in the chase camera and the cockpit camera. Your head turns the view about the camera's own axes.
 
 Centering is done in the tracker: OpenTrack's Center bind, the center button in your phone app, or SteamVR's reset.
 
 ## Configuration
 
-`HeadTracking.ini` is written to `root\bin\pc` on first run and read at startup. Edit it and restart the game. Every key it holds, with the shipped default:
+<!-- cameraunlock:config -->
+The mod reads its settings from `root\bin\pc\CameraUnlock.ini` in the game folder, and creates the file when it starts and finds none. Edit it with any text editor.
+
+A setting set to `default` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it, and neither do earlier versions of this mod. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
+
+`Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
+
+When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that. Edit it with any text editor.
+
+Earlier versions of the mod kept these settings in `HeadTracking.ini`, in the same folder. The first time this version starts and finds no `CameraUnlock.ini`, it reads your settings from `HeadTracking.ini` and writes them into `CameraUnlock.ini`. It never changes `HeadTracking.ini`, and does not read it again while `CameraUnlock.ini` exists.
+
+A setting that the defaults below set to `default` is written as `default` when the value imported for it equals its default at that start, which is the value `Defaults.ini` gives it, or the built-in value where `Defaults.ini` gives none. It then follows `Defaults.ini`. Every other setting is written with the value imported for it. `RotationEnabled` and `PositionEnabled` are one setting here, the tracking mode, so both are written as `default` or neither is.
+
+Comments, and keys the mod never read, are not carried over. Nor are these, where your old file had them:
+
+- Reticle settings, and a key that toggled the reticle.
+- A sensitivity, scale, deadzone, response curve or axis inversion you changed from its default. Set these in your tracker instead.
+- The setting for a feature that earlier versions shipped switched off while it was untested. It now follows the mod's default.
+
+An older version of the mod reads `HeadTracking.ini` and never reads `CameraUnlock.ini`, so a setting you change after updating is not in `HeadTracking.ini`.
+
+Deleting only `CameraUnlock.ini` makes the next start read `HeadTracking.ini` again. To go back to the defaults, replace everything in `CameraUnlock.ini` with the defaults below. Every setting they set to `default` then follows `Defaults.ini`.
+
+The built-in value of each setting set to `default` below:
+
+- `UdpPort=4242`
+- `EnableOnStartup=true`
+- `RotationEnabled=true`
+- `LocalSmoothing=0.0`
+- `RemoteSmoothing=0.15`
+- `PositionEnabled=true`
+- `PositionLimitX=0.3`
+- `PositionLimitY=0.2`
+- `PositionLimitYDown=0.2`
+- `PositionLimitZ=0.4`
+- `PositionLimitZBack=0.1`
+- `ToggleKey=End, Ctrl+Shift+Y`
+- `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
+
+With every setting at its default, the file reads:
 
 ```ini
+; RoadCraft head tracking settings.
+; Comments start with ; and go on their own line. Text after a value is part of the value.
+; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
+
+[CameraUnlock]
+; Written by the mod. Leave this section in place.
+ConfigFormat=1
+
 [Network]
-UdpPort=4242
+; UDP port the mod receives tracker data on (OpenTrack protocol).
+UdpPort=default
 
 [General]
-EnableOnStartup=1
-
-[Hotkeys]
-; Windows virtual key codes, in hex. Each action has a nav-cluster key and a
-; Ctrl+Shift+<key> chord, and both fire it.
-ToggleKey=0x23
-CycleModeKey=0x21
-ChordToggleKey=0x59
-ChordCycleModeKey=0x47
+; true: head tracking is on when the game starts. ToggleKey turns it on and off.
+EnableOnStartup=default
+; true: turning your head turns the view.
+; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
+RotationEnabled=default
 
 [Smoothing]
-; 0.0 none .. 1.0 heavy. Covers rotation and position. LocalSmoothing applies
-; to a tracker sending to 127.0.0.1; RemoteSmoothing to anything arriving over
-; the network, including this PC's own LAN address.
-LocalSmoothing=0.0
-RemoteSmoothing=0.15
+; Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.
+LocalSmoothing=default
+; Smoothing when the tracker is another device on the network, such as a phone.
+; 0 is the least, 1 the most.
+RemoteSmoothing=default
 
 [Position]
-Enabled=1
-; How far the head may move the camera, in metres, 0 to 0.5. LimitZ is leaning
-; forward and LimitZBack is leaning away; LimitY is up and LimitYDown is down.
-LimitX=0.30
-LimitY=0.20
-LimitYDown=0.20
-LimitZ=0.40
-LimitZBack=0.10
+; true: moving your head moves the view.
+; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
+PositionEnabled=default
+; How far, in metres, leaning left or right can move the view.
+PositionLimitX=default
+; How far, in metres, raising your head can move the view.
+PositionLimitY=default
+; How far, in metres, lowering your head can move the view.
+PositionLimitYDown=default
+; How far, in metres, leaning forward can move the view.
+PositionLimitZ=default
+; How far, in metres, leaning back can move the view.
+PositionLimitZBack=default
+
+[Hotkeys]
+; Turns head tracking on and off.
+ToggleKey=default
+; Changes the tracking mode: rotation and position, rotation only, position only.
+CycleTrackingModeKey=default
 ```
+<!-- /cameraunlock:config -->
+
+Changes take effect the next time the game starts.
+
+Hotkeys are written as key names, such as `End`, `PageUp`, `F9` or `Ctrl+Shift+Y`, separated by commas. A key with no name can be written as its Windows virtual key code, `0x` and two hex digits, such as `0xBA`. A value the mod cannot read leaves that setting at its default and is named in `HeadTracking.log`.
 
 Sensitivity, deadzones, curves and axis inversion are set up in your tracker, so one profile behaves the same in every game.
 
@@ -180,24 +250,22 @@ Read `HeadTracking.log`, in `root\bin\pc`. It records the game folder, the build
 
 **Jittery or unstable tracking:**
 
-- Raise `RemoteSmoothing` if the tracker is on another device, or `LocalSmoothing` if it is on this PC.
+- Raise `RemoteSmoothing` if the tracker is on another device, or `LocalSmoothing` if it is on this PC, both in `[Smoothing]` in `CameraUnlock.ini`.
 - If a phone app is sending direct, route it through OpenTrack so its filters can clean up the feed.
 
 **Tracking feels stronger or weaker than it should:**
 
 - The log's `[camera] now driving camera` line shows what that camera is rendering and the factor the head pose is scaled by. It reads `1.0000` when the camera is at the field of view you set in **Settings > Camera**. Away from that the `[camera] zoomed to` lines follow the game's own Dynamic FOV as it widens the frame, and a `[camera] ... now rests at` line means the mod read a change as you having moved a slider.
 
-**Edits to `HeadTracking.ini` do nothing:** the file is read once at startup, so restart the game. If a single value is being ignored, the log names it and says what it used instead.
+**Edits to `CameraUnlock.ini` do nothing:** the file is read once at startup, so restart the game. If a single value is being ignored, the log names it. Once `CameraUnlock.ini` exists the mod no longer reads `HeadTracking.ini`, so an edit there changes nothing.
 
 ## Updating
 
-Download the new release and run `install.cmd` again. Your `HeadTracking.ini` is preserved.
-
-That also means a key added by a newer release is not written into the file you already have. Copy the block for it out of the configuration section above, or delete `HeadTracking.ini` and start the game once to get a fresh one with every key in it.
+Download the new release and run `install.cmd` again. Your `CameraUnlock.ini` is kept. Updating from v0.1.0, the first start reads your settings from `HeadTracking.ini` into a new `CameraUnlock.ini`; see [Configuration](#configuration).
 
 ## Uninstalling
 
-Run `uninstall.cmd`. This removes `RoadCraftHeadTracking.asi` and the mod's log files. The Ultimate ASI Loader is only removed if the installer put it there. Use `uninstall.cmd /force` to remove it anyway. Your `HeadTracking.ini` is left alone either way.
+Run `uninstall.cmd`. This removes `RoadCraftHeadTracking.asi` and the mod's log files. The Ultimate ASI Loader is only removed if the installer put it there. Use `uninstall.cmd /force` to remove it anyway. `CameraUnlock.ini` and `HeadTracking.ini` are left in place either way, so your settings are still there if you install again.
 
 ## Building from Source
 

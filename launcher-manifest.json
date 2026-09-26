@@ -8,6 +8,14 @@
   "strategy": "AsiLoader",
   "delivery_mode": "manifest",
 
+  "config": {
+    "path": "root/bin/pc/CameraUnlock.ini",
+    "anchor": "game_root",
+    "legacy_source": "root/bin/pc/HeadTracking.ini",
+    "canonical_since": "0.2.0",
+    "per_game": {}
+  },
+
   "files": [
     { "source": "vendor/ultimate-asi-loader/dinput8.dll", "target": "root/bin/pc/dinput8.dll", "backup": true },
     { "source": "plugins/RoadCraftHeadTracking.asi", "target": "root/bin/pc/RoadCraftHeadTracking.asi" }

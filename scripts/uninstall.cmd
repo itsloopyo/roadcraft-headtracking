@@ -34,23 +34,17 @@ set "MOD_SEED_FILES="
 :: Config files the uninstall leaves in place so the player's settings survive a
 :: reinstall: paths relative to the game folder, quoted when one holds a space.
 :: Keep the line when it is blank, or the list another mod's uninstall.cmd set
-:: in the same console is used instead.
-set "PRESERVE_FILES="
+:: in the same console is used instead. CameraUnlock.ini holds the settings, and
+:: HeadTracking.ini is the file earlier versions read, which an older build
+:: reads again after a rollback.
+set "PRESERVE_FILES=root\bin\pc\CameraUnlock.ini root\bin\pc\HeadTracking.ini"
 :: Log files the mod writes at runtime, removed from wherever the DLLs were
 :: deployed. HeadTracking.log is rotated to HeadTracking.prev.log on each launch.
-::
-:: HeadTracking.ini is deliberately NOT here. Core removes MOD_LEFTOVERS
-:: unconditionally - outside the /force gate and outside the installed_by_us
-:: check - so listing the config here deleted a user's tuned settings on a
-:: routine uninstall, including the uninstall-then-reinstall people do to fix
-:: a mod after a game patch. The README ships in the same ZIP promising the
-:: file is left alone either way, and that is the behaviour worth keeping:
-:: the mod regenerates the INI on first run, so an orphan costs nothing.
 set "MOD_LEFTOVERS=HeadTracking.log HeadTracking.prev.log"
 :: Files to remove from the game root. Only needed by a mod deployed BELOW the
 :: root (see ASI_SUBDIR) that still resolves its config and log from the exe's
-:: own directory. This mod deploys into root\bin\pc and writes its INI and log
-:: there too, so MOD_LEFTOVERS covers them and the root holds nothing of ours.
+:: own directory. This mod deploys into root\bin\pc and writes its config and
+:: log there too, so the root holds nothing of ours.
 set "ROOT_EXTRAS="
 :: BeamNGUserMods: files the mod writes at runtime into the BeamNG user folder
 :: rather than into the mods\ folder the payload went into. Entries may carry a

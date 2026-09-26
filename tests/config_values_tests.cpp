@@ -144,8 +144,8 @@ void FlagTests() {
           "an empty value keeps the previous setting");
 }
 
-// The unknown-key warning reads the whole section back through
-// GetPrivateProfileSectionA, which truncates at the buffer it is given. A
+// The unknown-key warning reads the whole section back through Windows' section
+// reader, which truncates at the buffer it is given. A
 // section bigger than that used to abandon the check silently; now the buffer
 // grows. What a user can see either way is that the keys in the section still
 // load, and that is what this pins - the growth loop has to terminate and hand
