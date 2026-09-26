@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.0.0] - 2026-09-15
+## [0.1.0] - 2026-09-16
 
 ### Added
 - Added six degrees of freedom head tracking for the RoadCraft chase and cockpit cameras, driven by any OpenTrack compatible tracker over UDP.
