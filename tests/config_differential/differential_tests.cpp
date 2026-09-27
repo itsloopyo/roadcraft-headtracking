@@ -29,12 +29,21 @@
 // every value inside what the canonical rows hold, and no default moved, so
 // nothing may differ, the no-file input included.
 //
+// A row the player never changed from what v0.1.0 wrote follows Defaults.ini:
+// the import lists it in follows_defaults_ini and the migration writes it
+// `default`, the tracking mode pair as one unit. The test derives that list
+// from what the import read, a row whose every observed value is v0.1.0's
+// default, and holds the import's list to it on every input. Every input with
+// no row changed, the first-run file, the empty file and no file among them,
+// migrates to the committed file byte for byte.
+//
 // Each input migrates three times: over a Defaults.ini the owner creates with
 // the built-in values, from a read-only HeadTracking.ini, and over a
 // Defaults.ini that differs from the built-in value on every global row the
-// table binds. All three give the settings the import read, since the migration
-// writes `default` only where the imported value is what `default` gives at that
-// launch. After every load HeadTracking.ini keeps its bytes, write time and
+// table binds. Over the first two the session runs as the import read, since
+// v0.1.0's defaults are the built-in values. Over the third a row the player
+// never changed is `default` and takes Defaults.ini's value, and a changed row
+// keeps the player's. After every load HeadTracking.ini keeps its bytes, write time and
 // attributes, and the folder holds it and CameraUnlock.ini and nothing else. The
 // distinct migrated files are written beside the executable under migrated\,
 // for lint-migrated.mjs to run core's canonical config lint over.
@@ -86,6 +95,7 @@ namespace config = rc_ht::config;
 namespace legacy = rc_ht::legacy;
 namespace testing = cameraunlock::config::testing;
 using rc_ht::Config;
+using cfg::schema::Concept;
 
 int g_failures = 0;
 int g_checks = 0;
@@ -323,6 +333,93 @@ std::vector<std::string> Differences(const Record& a, const Record& b) {
     return out;
 }
 
+// ---- Rows that follow Defaults.ini ---------------------------------------------------
+//
+// The row a record entry observes, or none for the position sensitivity and
+// inversion, which no build had a setting for. start.mode stands for the
+// tracking mode pair.
+
+std::optional<Concept> RowOf(const std::string& entry) {
+    static const std::map<std::string, Concept> rows = {
+        {"field.udp_port", Concept::UdpPort},
+        {"start.enabled", Concept::EnableOnStartup},
+        {"start.mode", Concept::RotationEnabled},
+        {"field.local_smoothing", Concept::LocalSmoothing},
+        {"field.pos.local_smoothing", Concept::LocalSmoothing},
+        {"field.remote_smoothing", Concept::RemoteSmoothing},
+        {"field.pos.remote_smoothing", Concept::RemoteSmoothing},
+        {"field.pos.limit_x", Concept::PositionLimitX},
+        {"field.lean.x", Concept::PositionLimitX},
+        {"field.pos.limit_y", Concept::PositionLimitY},
+        {"field.lean.y_up", Concept::PositionLimitY},
+        {"field.pos.limit_y_down", Concept::PositionLimitYDown},
+        {"field.lean.y_down", Concept::PositionLimitYDown},
+        {"field.pos.limit_z", Concept::PositionLimitZ},
+        {"field.lean.z_forward", Concept::PositionLimitZ},
+        {"field.pos.limit_z_back", Concept::PositionLimitZBack},
+        {"field.lean.z_back", Concept::PositionLimitZBack},
+        {"hotkey.Toggle", Concept::ToggleKey},
+        {"hotkey.CycleTrackingMode", Concept::CycleTrackingModeKey},
+    };
+    const auto it = rows.find(entry);
+    if (it != rows.end()) return it->second;
+    if (entry.rfind("field.pos.sensitivity_", 0) == 0 || entry.rfind("field.pos.invert_", 0) == 0) return std::nullopt;
+    throw std::logic_error("no row observes " + entry);
+}
+
+// Every row the table binds, each of which follows Defaults.ini.
+const std::set<Concept>& AllRows() {
+    static const std::set<Concept> all = {
+        Concept::UdpPort,        Concept::EnableOnStartup, Concept::RotationEnabled,    Concept::PositionEnabled,
+        Concept::LocalSmoothing, Concept::RemoteSmoothing, Concept::PositionLimitX,     Concept::PositionLimitY,
+        Concept::PositionLimitYDown, Concept::PositionLimitZ, Concept::PositionLimitZBack, Concept::ToggleKey,
+        Concept::CycleTrackingModeKey,
+    };
+    return all;
+}
+
+// The rows whose observed values differ between two records. The mode pair is
+// both rows or neither.
+std::set<Concept> RowsThatDiffer(const Record& a, const Record& b) {
+    std::set<Concept> differ;
+    for (const auto& [entry, value] : a) {
+        const std::optional<Concept> row = RowOf(entry);
+        if (row && b.at(entry) != value) differ.insert(*row);
+    }
+    if (differ.count(Concept::RotationEnabled)) differ.insert(Concept::PositionEnabled);
+    return differ;
+}
+
+// The rows the player never changed: every entry of the row reads as it does
+// with no file, v0.1.0's defaults.
+std::set<Concept> UntouchedRows(const Record& imported, const Record& defaults) {
+    const std::set<Concept> changed = RowsThatDiffer(imported, defaults);
+    std::set<Concept> untouched;
+    for (const Concept row : AllRows()) {
+        if (!changed.count(row)) untouched.insert(row);
+    }
+    return untouched;
+}
+
+std::string Names(const std::set<Concept>& rows) {
+    std::string text;
+    for (const Concept row : rows) {
+        text += (text.empty() ? "" : ", ") + std::string(cfg::schema::kConcepts[static_cast<std::size_t>(row)].name);
+    }
+    return text.empty() ? "none" : text;
+}
+
+// What the session runs on over a Defaults.ini other than the built-in one: the
+// import's record, with each row the import left to Defaults.ini as that file
+// gives it.
+Record OverDefaults(Record want, const std::set<Concept>& follows, const Record& defaults_ini) {
+    for (auto& [entry, value] : want) {
+        const std::optional<Concept> row = RowOf(entry);
+        if (row && follows.count(*row)) value = defaults_ini.at(entry);
+    }
+    return want;
+}
+
 // ---- Inputs ------------------------------------------------------------------------
 
 fs::path DataPath(const char* name) {
@@ -532,6 +629,15 @@ void Compare(const std::vector<Input>& inputs) {
     const cfg::ConfigTable<Config> table = config::Table();
     const Record defaults = ObserveImport(legacy::Config{});
     Tally builtin, readonly, skewed;
+    Config skewedConfig;
+    const std::vector<std::string> skewedDiagnostics = CanonicalDiagnostics(kSkewedDefaults, skewedConfig);
+    for (const std::string& d : skewedDiagnostics) std::printf("  the skewed Defaults.ini: %s\n", d.c_str());
+    Check(skewedDiagnostics.empty(), "the skewed Defaults.ini sets every row with no diagnostic");
+    const Record skewedRecord = ObserveCanonical(skewedConfig);
+    Check(RowsThatDiffer(ObserveCanonical(table.defaults()), skewedRecord) == AllRows(),
+          "the skewed Defaults.ini differs from the built-in values on every row");
+    int touched = 0;
+    int modeTouched = 0;
     int compared = 0;
     int changed = 0;
     for (const Input& input : inputs) {
@@ -540,6 +646,7 @@ void Compare(const std::vector<Input>& inputs) {
         // Comparison 1. Both read one copy, which neither writes.
         legacy::Config read;
         Record imported;
+        std::set<Concept> follows;
         {
             Scratch s;
             if (input.present) s.WriteLegacy(input.bytes);
@@ -568,6 +675,19 @@ void Compare(const std::vector<Input>& inputs) {
                   name + ": the import reads every input, as the published build did");
             Check(result.dropped.empty() && result.pose_shaping.empty(),
                   name + ": the import drops nothing, since the reader read no setting an approved change removes");
+            follows.insert(result.follows_defaults_ini.begin(), result.follows_defaults_ini.end());
+            Check(follows.size() == result.follows_defaults_ini.size(), name + ": follows_defaults_ini names each row once");
+            const std::set<Concept> untouched = UntouchedRows(imported, defaults);
+            if (follows != untouched) {
+                std::printf("  %s: follows Defaults.ini %s, untouched %s\n", name.c_str(), Names(follows).c_str(),
+                            Names(untouched).c_str());
+            }
+            Check(follows == untouched, name + ": the rows left to Defaults.ini are exactly the ones the player never changed");
+            if (untouched != AllRows()) ++touched;
+            if (!untouched.count(Concept::RotationEnabled)) ++modeTouched;
+            if (name == kNewestFirstRunName || name == "no file" || name == "empty file") {
+                Check(untouched == AllRows(), name + ": every row follows Defaults.ini");
+            }
             const Config migrated = Migrate(input, s, name, builtin);
             const std::vector<std::string> diff = Differences(imported, ObserveCanonical(migrated));
             for (const std::string& d : diff) std::printf("  comparison 2, %s: %s\n", name.c_str(), d.c_str());
@@ -579,10 +699,11 @@ void Compare(const std::vector<Input>& inputs) {
                 CanonicalDiagnostics(ReadFileBytes(s.canonical()), reread);
                 Check(Differences(ObserveCanonical(reread), ObserveCanonical(migrated)).empty(),
                       name + ": CameraUnlock.ini reads back as the settings the session runs on");
-                // Fresh equals upgrade: the file the newest build wrote on its
-                // first start, which is also the defaults it documented, and no
-                // file at all, both end as the committed file.
-                if (name == kNewestFirstRunName || name == "no file") {
+                // Fresh equals upgrade: every input that changes no row, the
+                // file the newest build wrote on its first start (also the
+                // defaults it documented), an empty file and no file at all
+                // among them, ends as the committed file, `default` on every row.
+                if (follows == AllRows()) {
                     Check(ReadFileBytes(s.canonical()) == committed, name + ": gives the committed file, byte for byte");
                 }
             }
@@ -614,9 +735,19 @@ void Compare(const std::vector<Input>& inputs) {
             s.WriteLegacy(input.bytes);
             s.WriteDefaults(kSkewedDefaults);
             const Config c = Migrate(input, s, name + " (skewed Defaults.ini)", skewed);
-            const std::vector<std::string> diff = Differences(imported, ObserveCanonical(c));
+            const std::vector<std::string> diff =
+                Differences(OverDefaults(imported, follows, skewedRecord), ObserveCanonical(c));
             for (const std::string& d : diff) std::printf("  comparison 2, %s (skewed Defaults.ini): %s\n", name.c_str(), d.c_str());
-            Check(diff.empty(), name + ": the migration gives the import's settings over a Defaults.ini that differs everywhere");
+            Check(diff.empty(), name + ": over a Defaults.ini that differs everywhere, the untouched rows take its values "
+                                       "and the changed rows keep the import's");
+            if (fs::exists(s.canonical())) {
+                const std::string migrated = ReadFileBytes(s.canonical());
+                for (const Concept row : follows) {
+                    const std::string key = cfg::schema::kConcepts[static_cast<std::size_t>(row)].key;
+                    Check(migrated.find("\r\n" + key + "=default\r\n") != std::string::npos,
+                          name + " (skewed Defaults.ini): " + key + " is written default");
+                }
+            }
         }
         ++compared;
     }
@@ -624,7 +755,10 @@ void Compare(const std::vector<Input>& inputs) {
                 changed);
     std::printf("over built-in Defaults.ini: %d created, %d migrated; read-only: %d migrated; skewed Defaults.ini: "
                 "%d migrated\n", builtin.created, builtin.migrated, readonly.migrated, skewed.migrated);
+    std::printf("%d inputs changed a row from v0.1.0's default, %d of them the tracking mode\n", touched, modeTouched);
     Check(changed > 0, "the inputs reach settings other than the defaults");
+    Check(touched > 0 && modeTouched > 0,
+          "the inputs change rows, the tracking mode among them, which then do not follow Defaults.ini");
 
     // Core's canonical config lint runs over these next (lint-migrated.mjs).
     std::set<std::string> files = builtin.files;
