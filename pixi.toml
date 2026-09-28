@@ -42,7 +42,9 @@ clean-all = { cmd = """
 # reader, and core's canonical config lint over every file that test migrated.
 # Builds in build-tests/ so the packaged build/ tree never contains a test
 # binary. Needs no game install.
-test = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/run-tests.ps1" }
+test-unit = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/run-tests.ps1 -Suite unit" }
+test-differential = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/run-tests.ps1 -Suite differential" }
+test = { depends-on = ["test-unit", "test-differential"] }
 build-tests = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/run-tests.ps1 -NoRun" }
 
 # Rewrites HeadTracking.ini, the committed CameraUnlock.ini (the path core's
@@ -57,11 +59,12 @@ update-deps = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/update-d
 # Installer ZIP only. There is no -nexus.zip: the payload has to sit beside the
 # exe in root\bin\pc, where no mod manager deploys, so a Nexus archive would
 # install and never load. scripts/package-release.ps1 carries the full reason.
-# `test` as well as `build`: the commit a release is cut from is named
-# "Release vX.Y.Z", which build.yml skips on purpose, and the tag workflow's
-# only build step is this task. Without the dependency the exact tree that
-# becomes the published .asi is the one tree CI never runs the suite against.
-package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["test", "build"] }
+# `test-unit` as well as `build`: the commit a release is cut from is named
+# "Release vX.Y.Z", which build.yml skips on purpose, and the tag workflow
+# builds through this task, then runs test-differential. Without the dependency
+# the exact tree that becomes the published .asi is the one tree CI never runs
+# the suite against.
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["test-unit", "build"] }
 
 # Both take no arguments: they check this repo's newest release ZIP against
 # launcher-manifest.json, and THIRD-PARTY-NOTICES.md against what ships.
