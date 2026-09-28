@@ -15,8 +15,6 @@ $ErrorActionPreference = "Stop"
 $projectDir = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $projectDir "cameraunlock-core/powershell/ReleaseWorkflow.psm1") -Force
 
-# Mirrors New-ChangelogFromCommits' insertion so a -Force maintenance entry
-# lands in the same place with the same shape.
 # UTF-8 with no BOM, always. Windows PowerShell 5.1's Set-Content defaults to
 # the system ANSI codepage, and Get-Content -Raw assumes the same for a file
 # with no BOM - so a commit subject carrying an accent or a typographic
@@ -25,20 +23,6 @@ Import-Module (Join-Path $projectDir "cameraunlock-core/powershell/ReleaseWorkfl
 # this reason; so does this.
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding $false))
-}
-
-function Add-MaintenanceChangelogEntry {
-    param([string]$Path, [string]$NewVersion)
-    $date = Get-Date -Format 'yyyy-MM-dd'
-    $entry = "## [$NewVersion] - $date`n`n### Changed`n`n- Maintenance release (no user-facing changes).`n`n"
-    $changelog = Get-Content $Path -Raw -Encoding UTF8
-    if ($changelog -match '(?s)(# Changelog.*?)(## \[)') {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$entry"
-    } else {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$entry"
-    }
-    $changelog = $changelog.TrimEnd() + "`n"
-    Write-Utf8NoBom $Path $changelog
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -105,25 +89,12 @@ if ($LASTEXITCODE -ne 0) {
 #    mutating any version files or building - a failure here then leaves a
 #    clean tree instead of stranding a half-applied version bump with no tag.
 Write-Host "Generating CHANGELOG..." -ForegroundColor Cyan
-$hasExistingTags = git tag -l
-if (-not $hasExistingTags) {
-    if (-not (Test-Path $changelogPath)) {
-        $date = Get-Date -Format 'yyyy-MM-dd'
-        Write-Utf8NoBom $changelogPath "# Changelog`n`n## [$newVersion] - $date`n`nFirst release.`n"
-        Write-Host "  Wrote initial CHANGELOG.md" -ForegroundColor Gray
-    }
-} else {
-    try {
-        New-ChangelogFromCommits -ChangelogPath $changelogPath -Version $newVersion | Out-Null
-    } catch {
-        if (-not $Force) {
-            Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "No user-facing changes to release. Re-run with -Force for a maintenance release." -ForegroundColor Yellow
-            exit 1
-        }
-        Write-Host "No user-facing commits since last tag - writing maintenance entry (-Force)." -ForegroundColor Yellow
-        Add-MaintenanceChangelogEntry -Path $changelogPath -NewVersion $newVersion
-    }
+try {
+    New-ChangelogFromCommits -ChangelogPath $changelogPath -Version $newVersion -Maintenance:$Force | Out-Null
+} catch {
+    Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "No user-facing changes to release. Re-run with -Force for a maintenance release." -ForegroundColor Yellow
+    exit 1
 }
 
 # 4. Bump the canonical version, then mirror it into every derived copy.
