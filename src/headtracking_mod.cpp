@@ -193,6 +193,13 @@ const char* ModeName(cameraunlock::TrackingMode mode) {
 // writing at the same moment. The save runs once the lock is released, so a
 // slow disk never holds up the camera path: the session has the new mode first,
 // then CameraUnlock.ini saves it, so the next start begins in it.
+//
+// The poller calls this from a bare std::thread with no handler above it, so an
+// exception escaping here is std::terminate and the game closes on a key press.
+// Save reports most disk failures through its result but still throws for some
+// (reading the file's write time back after a committed write, for one), and a
+// failed save is the same outcome either way: logged, and the session keeps the
+// mode the player chose.
 void CycleTrackingMode() {
     cameraunlock::TrackingMode mode;
     {
@@ -200,7 +207,12 @@ void CycleTrackingMode() {
         mode = g_session.CycleMode();
     }
     Log::Line("[input] tracking mode: %s", ModeName(mode));
-    config::SaveTrackingMode(mode);
+    try {
+        config::SaveTrackingMode(mode);
+    } catch (const std::exception& e) {
+        Log::Line("[config] saving the tracking mode failed: %s - this session keeps it, the next "
+                  "start does not", e.what());
+    }
 }
 
 // The table's hotkey codec lets only a list ParseKeyBindings reads into the
