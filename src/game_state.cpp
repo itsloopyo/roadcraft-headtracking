@@ -10,6 +10,7 @@
 
 #include "builds/build_registry.h"
 #include "logging.h"
+#include "game_memory.h"
 
 #include "cameraunlock/hooks/hook_manager.h"
 
@@ -44,22 +45,28 @@ int __fastcall SetStateByIdDetour(std::uint32_t group, std::uint32_t state) {
     return g_original_set_state(group, state);
 }
 
-std::uintptr_t ReadPointer(std::uintptr_t address) {
-    return *reinterpret_cast<const std::uintptr_t*>(address);
-}
-
-// A vtable that is not the one the profile was derived against means the
+// A vtable that differs from the discovered constructor's table means the
 // pointer is some other class, so nothing at these offsets can be trusted.
 // Said once per object, because the caller runs on the camera path.
-bool HasProfileVtable(std::uintptr_t object, unsigned vtable_rva,
+bool HasProfileVtable(std::uintptr_t object, unsigned vtable_rva, unsigned size,
                       std::atomic<bool>& logged, const char* what) {
-    if (ReadPointer(object) == g_module_base + vtable_rva) return true;
+    std::uintptr_t vtable = 0;
+    if (ReadableGameObject(object, size) && ReadGameValue(object, vtable) && vtable == g_module_base + vtable_rva) return true;
     if (!logged.exchange(true)) {
-        Log::Line("[state] the %s at 0x%llX is not the class this build profile expects - "
+        Log::Line("[state] the %s at 0x%llX failed the discovered object bounds/vtable check - "
                   "treating every frame as a co-op session.",
                   what, static_cast<unsigned long long>(object));
     }
     return false;
+}
+
+void LogUnreadableState() {
+    static unsigned long long last = 0;
+    const auto now = GetTickCount64();
+    if (now - last >= 2000) {
+        last = now;
+        Log::Line("[state] a required game-state read failed; tracking is held off");
+    }
 }
 
 }  // namespace
@@ -118,28 +125,48 @@ bool IsMenuOpen() {
 }
 
 bool IsLoadingScreenUp() {
-    return ReadPointer(g_module_base + g_offsets.loading_screen_global_rva) != 0;
+    std::uintptr_t screen = 0;
+    if (!ReadGameValue(g_module_base + g_offsets.loading_screen_global_rva, screen)) {
+        LogUnreadableState(); return true;
+    }
+    return screen != 0;
 }
 
 bool IsMultiplayerSessionLive() {
-    const std::uintptr_t client = ReadPointer(g_module_base + g_offsets.matchmaking_client_global_rva);
+    const auto& discovered = builds::ActiveDiscovery();
+    std::uintptr_t client = 0;
+    if (!ReadGameValue(g_module_base + g_offsets.matchmaking_client_global_rva, client)) {
+        LogUnreadableState(); return true;
+    }
     if (client == 0) return false;
-    if (!HasProfileVtable(client, g_offsets.matchmaking_client_vtable_rva,
+    if (!HasProfileVtable(client, g_offsets.matchmaking_client_vtable_rva, discovered.client_size,
                           g_logged_client_mismatch, "matchmaking client")) {
         return true;
     }
 
-    const std::uintptr_t manager = ReadPointer(client + g_offsets.client_session_manager);
+    std::uintptr_t manager = 0;
+    if (!ReadGameValue(client + g_offsets.client_session_manager, manager)) {
+        LogUnreadableState(); return true;
+    }
     if (manager == 0) return false;
-    if (!HasProfileVtable(manager, g_offsets.session_manager_vtable_rva,
+    if (!HasProfileVtable(manager, g_offsets.session_manager_vtable_rva, discovered.manager_size,
                           g_logged_manager_mismatch, "game session manager")) {
         return true;
     }
 
-    const std::uintptr_t session = ReadPointer(manager + g_offsets.session_manager_session);
-    const std::int32_t state =
-        *reinterpret_cast<const std::int32_t*>(manager + g_offsets.session_manager_state);
-    return session != 0 || state != 0;
+    std::uintptr_t session = 0;
+    std::int32_t state = 0;
+    if (!ReadGameValue(manager + g_offsets.session_manager_session, session) ||
+        !ReadGameValue(manager + g_offsets.session_manager_state, state)) {
+        LogUnreadableState(); return true;
+    }
+    static std::uintptr_t last_manager = 0;
+    if (last_manager != manager) {
+        last_manager = manager;
+        Log::Line("[state] live client/manager vtables and bounds validated; session=%p state=%d idle=%d",
+            reinterpret_cast<void*>(session), state, discovered.session_idle);
+    }
+    return session != 0 || state != discovered.session_idle;
 }
 
 bool ShouldFollowHead(bool tracking_enabled, bool menu_open, bool loading,

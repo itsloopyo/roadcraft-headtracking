@@ -7,6 +7,7 @@
 #include <intrin.h>
 
 #include <cstdint>
+#include <cmath>
 #include <cstring>
 #include <mutex>
 
@@ -15,6 +16,7 @@
 #include "camera_transform.h"
 #include "headtracking_mod.h"
 #include "logging.h"
+#include "game_memory.h"
 
 #include "cameraunlock/hooks/hook_manager.h"
 
@@ -31,7 +33,7 @@ std::uintptr_t g_return_b = 0;
 
 // The camera the component system last drove, so a change of view (chase to
 // cockpit) shows up in the log once rather than never. Plain, like the other
-// one-shot latches below: everything in this file is reached only from
+// logging state below: everything in this file is reached only from
 // ComposeBasis, which holds CameraPathMutex() for its whole body.
 void* g_last_camera = nullptr;
 
@@ -78,19 +80,20 @@ void LogZoomExcursion(const FovReading& fov) {
 }
 
 void LogUnreadableFov(void* camera) {
-    static bool logged = false;
-    if (logged) return;
-    logged = true;
-    Log::Line("[camera] camera 0x%p reports no usable field of view - head tracking is applied "
-              "unscaled on it", camera);
+    static ULONGLONG last = 0;
+    const auto now = GetTickCount64();
+    if (last && now - last < 2000) return;
+    last = now;
+    Log::Line("[camera] camera 0x%p failed live object/FOV validation; head tracking is held off", camera);
 }
 
-void LogFirstComposedFrame(const CameraBasis& clean, const CameraBasis& tracked,
+void LogComposedFrame(const CameraBasis& clean, const CameraBasis& tracked,
                            const HeadPose& pose) {
-    static bool logged = false;
-    if (logged) return;
-    logged = true;
-    Log::Line("[camera] first composed frame: pose yaw=%.2f pitch=%.2f roll=%.2f lean=%.3f %.3f "
+    static ULONGLONG last = 0;
+    const auto now = GetTickCount64();
+    if (last && now - last < 1000) return;
+    last = now;
+    Log::Line("[camera] composed frame: pose yaw=%.2f pitch=%.2f roll=%.2f lean=%.3f %.3f "
               "%.3f; forward (%.3f %.3f %.3f) -> (%.3f %.3f %.3f); eye moved %.3f %.3f %.3f",
               pose.yaw, pose.pitch, pose.roll, pose.lean_x, pose.lean_y, pose.lean_z,
               clean.forward[0], clean.forward[1], clean.forward[2],
@@ -117,9 +120,20 @@ bool ComposeBasis(void* camera, const float* position, const float* up, const fl
                   const float* forward, CameraBasis& composed) {
     const std::lock_guard<std::mutex> guard(CameraPathMutex());
 
+    const auto& discovery = builds::ActiveDiscovery();
+    float aspect = 0;
+    const auto address = reinterpret_cast<std::uintptr_t>(camera);
+    if (!ReadableGameObject(address, discovery.camera_size) ||
+        !ReadGameValue(address + discovery.camera_aspect, aspect) ||
+        !ReadableGameObject(reinterpret_cast<std::uintptr_t>(position), 12) ||
+        !ReadableGameObject(reinterpret_cast<std::uintptr_t>(up), 12) ||
+        !ReadableGameObject(reinterpret_cast<std::uintptr_t>(right), 12) ||
+        !ReadableGameObject(reinterpret_cast<std::uintptr_t>(forward), 12)) {
+        LogUnreadableFov(camera); return false;
+    }
     FovReading fov;
     const bool have_fov = ReadFov(camera, fov);
-    if (have_fov) {
+    if (have_fov && std::isfinite(aspect) && std::fabs(aspect * fov.aspect - 1.0f) < 0.002f) {
         LogCameraChange(camera, fov);
         if (BaseWidenedOnLastRead()) {
             Log::Line("[camera] camera 0x%p now rests at %.4f deg horizontal - reading it as the "
@@ -129,19 +143,16 @@ bool ComposeBasis(void* camera, const float* position, const float* up, const fl
         LogZoomExcursion(fov);
     } else {
         LogUnreadableFov(camera);
+        return false;
     }
 
-    // A narrower field of view magnifies the head's effect on the picture along
-    // with everything else in the frame, so the pose is scaled to cover the same
-    // fraction of the screen whatever the camera is zoomed to. A camera whose
-    // field of view cannot be read is left unscaled rather than guessed at.
     HeadPose pose;
-    if (!PoseForThisFrame(pose, have_fov ? fov.zoom_factor : 1.0f)) return false;
+    if (!PoseForThisFrame(pose, fov.zoom_factor)) return false;
 
     const CameraBasis clean = BasisFromArguments(position, up, right, forward);
     composed = clean;
     ApplyHeadPose(composed, pose);
-    LogFirstComposedFrame(clean, composed, pose);
+    LogComposedFrame(clean, composed, pose);
     return true;
 }
 

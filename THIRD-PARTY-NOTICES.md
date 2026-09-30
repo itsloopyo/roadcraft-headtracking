@@ -265,7 +265,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - **License:** BSD-2-Clause
 - **Upstream:** https://github.com/TsudaKageyu/minhook (bundled by MinHook
   upstream)
-- **Usage:** Length disassembly for MinHook's trampoline construction.
+- **Usage:** Instruction decoding for runtime discovery and MinHook's trampoline construction.
   Compiled into the `.asi`.
 - **Bundled:** yes, statically linked into `RoadCraftHeadTracking.asi`.
 
@@ -364,8 +364,9 @@ shipped executable as it runs:
   object, its world position and its up, right and forward rows, and then
   rebuilds the view matrix and frustum from them. The mod only acts on calls
   made by the per-frame camera system, identified by two return addresses. Those
-  three addresses and the byte offsets of the camera's horizontal and vertical
-  fields of view, for one build of the game, are among what `src/builds/` holds.
+  addresses and the camera's horizontal and vertical field offsets are discovered
+  from instruction and object relationships. Historical profiles in `src/builds/`
+  cross-check discovery on previously measured builds.
 - The camera's world matrix is row-major with right, up and forward in rows 0
   to 2 and the eye in row 3, and right x up = -forward. That layout was read off
   a live matrix, not taken from any published source.
@@ -381,7 +382,8 @@ shipped executable as it runs:
   the session manager it holds (named `hydra_mm/game_session_mgr` in the
   executable's own strings) and two fields of that manager, the current session
   and its state, checking both objects' vtables first. Those addresses and
-  offsets are also in `src/builds/`.
+  offsets and the idle state value are discovered with their object ownership,
+  field widths and allocation bounds.
 
 No decompiled or reconstructed game logic appears in this repository, and the
 mod ships nothing belonging to Saber Interactive or Focus Entertainment. Should

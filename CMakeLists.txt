@@ -18,6 +18,11 @@ set(CAMERAUNLOCK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(CAMERAUNLOCK_BUILD_HOOKS ON CACHE BOOL "" FORCE)
 add_subdirectory(cameraunlock-core/cpp ${CMAKE_BINARY_DIR}/cameraunlock-core)
 
+add_library(rc_discovery STATIC src/builds/runtime_discovery.cpp src/builds/camera_contract.cpp)
+target_include_directories(rc_discovery PUBLIC src cameraunlock-core/cpp/include
+    PRIVATE cameraunlock-core/vendor/minhook/src/hde)
+target_link_libraries(rc_discovery PUBLIC minhook)
+
 set(MOD_SOURCES
     src/dllmain.cpp
     src/headtracking_mod.cpp
@@ -29,6 +34,7 @@ set(MOD_SOURCES
     src/game_state.cpp
     src/window_centering.cpp
     src/builds/build_registry.cpp
+    src/builds/runtime_image.cpp
     src/builds/steam_offsets.cpp
 )
 
@@ -48,6 +54,7 @@ target_compile_definitions(RoadCraftHeadTracking PRIVATE
 target_link_libraries(RoadCraftHeadTracking PRIVATE
     cameraunlock
     cameraunlock_hooks
+    rc_discovery
     ws2_32
 )
 
@@ -86,6 +93,10 @@ if(RC_BUILD_TESTS)
     # The frozen reader's value guards - headers only, nothing to link.
     rc_add_test(config_sanitize)
 
+    rc_add_test(runtime_discovery src/builds/build_registry.cpp src/builds/steam_offsets.cpp)
+    target_include_directories(rc_runtime_discovery_tests PRIVATE cameraunlock-core/vendor/minhook/src/hde)
+    target_link_libraries(rc_runtime_discovery_tests PRIVATE rc_discovery cameraunlock)
+
     # The camera composition compiled from the production translation unit:
     # signs, camera-local rotation order, clean-axis lean and the gate blend.
     rc_add_test(camera_transform src/camera_transform.cpp)
@@ -95,9 +106,9 @@ if(RC_BUILD_TESTS)
     rc_add_test(camera_fov src/camera_fov.cpp src/camera_transform.cpp)
 
     # The gate's pure classification and the Wwise ID hash it matches on.
-    rc_add_test(game_state src/game_state.cpp src/builds/build_registry.cpp
+    rc_add_test(game_state src/game_state.cpp src/builds/build_registry.cpp src/builds/runtime_image.cpp
                 src/builds/steam_offsets.cpp)
-    target_link_libraries(rc_game_state_tests PRIVATE cameraunlock cameraunlock_hooks)
+    target_link_libraries(rc_game_state_tests PRIVATE cameraunlock cameraunlock_hooks rc_discovery)
 
     # The committed config against the table's fresh render, the fleet's
     # default hotkeys, and the mode cycle's save. `rc_config_tests

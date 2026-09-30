@@ -1,82 +1,60 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 itsloopyo
-
-#include "builds/build_registry.h"
-
+#include "build_registry.h"
 #include "logging.h"
-
-using cameraunlock::memory::FingerprintMismatch;
-using cameraunlock::memory::PeFingerprint;
+#include <cstring>
 
 namespace rc_ht::builds {
 
-const BuildProfile* const kKnownProfiles[] = {
-    &kSteamProfile_20260911,
-    &kSteamProfile_20260902,
-};
+const BuildProfile* const kKnownProfiles[] = {&kSteamProfile_20260911, &kSteamProfile_20260902};
 const std::size_t kKnownProfileCount = sizeof(kKnownProfiles) / sizeof(kKnownProfiles[0]);
 
 namespace {
-
-const BuildProfile* g_active = nullptr;
-
-// Says which side of the known builds the running EXE fell on, against the
-// diagnostic primary - the newest profile in the registry, which is why
-// kKnownProfiles is ordered newest first. This is the whole of what a user sees
-// when their build is unrecognised, so it has to name the direction rather than
-// just refusing.
-void LogUnknownBuild(const PeFingerprint& running) {
-    const BuildProfile& primary = *kKnownProfiles[0];
-    switch (cameraunlock::memory::ClassifyMismatch(running, primary.Fingerprint)) {
-    case FingerprintMismatch::Newer:
-        Log::Line("[build] this game build is NEWER than any build this mod knows about "
-                  "(newest known: %s). Check the mod's releases page for an update.", primary.Name);
-        break;
-    case FingerprintMismatch::Older:
-        Log::Line("[build] this game build is OLDER than any build this mod knows about "
-                  "(newest known: %s). Let the store finish updating the game.", primary.Name);
-        break;
-    case FingerprintMismatch::Differs:
-        Log::Line("[build] this EXE has a known build timestamp but a different size/checksum "
-                  "(repacked or modified binary). This mod will not engage on a modified EXE.");
-        break;
-    }
-    Log::Line("[build] staying fully dormant: no hooks installed, the game runs vanilla.");
+BuildProfile g_active{};
+DiscoveryResult g_discovery{};
 }
 
-}  // namespace
+const BuildProfile& ActiveProfile() { return g_active; }
+const DiscoveryResult& ActiveDiscovery() { return g_discovery; }
 
-const BuildProfile& ActiveProfile() { return *g_active; }
-
-ProfileSelection SelectProfile(void* moduleBase) {
-    PeFingerprint running{};
-    if (!cameraunlock::memory::ReadPeFingerprint(moduleBase, running)) {
-        Log::Line("[build] could not read PE headers of the running module; staying dormant");
+ProfileSelection SelectProfile(ImageView view) {
+    g_active = {};
+    g_discovery = {};
+    DiscoveryResult result;
+    if (!DiscoverRuntime(view, result)) {
+        Log::Line("[build] runtime discovery rejected: %s; no dependent hooks installed", result.error.c_str());
         return ProfileSelection::NoMatch;
     }
-
-    Log::Line("[build] running EXE fingerprint: TimeDateStamp=0x%08X SizeOfImage=0x%08X CheckSum=0x%08X",
-              running.TimeDateStamp, running.SizeOfImage, running.CheckSum);
-
-    for (std::size_t i = 0; i < kKnownProfileCount; ++i) {
-        const BuildProfile& p = *kKnownProfiles[i];
-        const bool match = running.Matches(p.Fingerprint);
-        Log::Line("[build]   vs %-24s TimeDateStamp=0x%08X SizeOfImage=0x%08X CheckSum=0x%08X -> %s",
-                  p.Name, p.Fingerprint.TimeDateStamp, p.Fingerprint.SizeOfImage,
-                  p.Fingerprint.CheckSum, match ? "MATCH" : "no");
-        if (!match) continue;
-
-        if (!IsProfileComplete(p)) {
-            Log::Line("[build] profile %s is a placeholder (offsets not derived yet); staying dormant", p.Name);
-            return ProfileSelection::Incomplete;
+    unsigned nt;
+    std::memcpy(&nt, view.data + 0x3c, sizeof(nt));
+    cameraunlock::memory::PeFingerprint fingerprint{};
+    std::memcpy(&fingerprint.TimeDateStamp, view.data + nt + 8, 4);
+    std::memcpy(&fingerprint.SizeOfImage, view.data + nt + 24 + 56, 4);
+    std::memcpy(&fingerprint.CheckSum, view.data + nt + 24 + 64, 4);
+    const char* name = "unlisted-runtime-discovery";
+    for (const auto* profile : kKnownProfiles) {
+        if (!fingerprint.Matches(profile->Fingerprint)) continue;
+        static_assert(sizeof(OffsetTable) == 12 * sizeof(unsigned), "offset table has padding");
+        if (std::memcmp(&profile->Offsets, &result.offsets, sizeof(OffsetTable)) != 0 || result.session_idle != 0) {
+            Log::Line("[build] runtime discovery disagrees with historical profile %s; staying dormant", profile->Name);
+            return ProfileSelection::NoMatch;
         }
-        g_active = &p;
-        Log::Line("[build] activated profile %s", p.Name);
-        return ProfileSelection::Matched;
+        name = profile->Name;
     }
-
-    LogUnknownBuild(running);
-    return ProfileSelection::NoMatch;
+    g_active = {name, fingerprint, result.offsets};
+    g_discovery = std::move(result);
+    const auto& o = g_active.Offsets;
+    Log::Line("[build] runtime discovery selected %s: %08X/%08X/%08X", name,
+        fingerprint.TimeDateStamp, fingerprint.SizeOfImage, fingerprint.CheckSum);
+    Log::Line("[build] camera=%08X callers=%08X/%08X FOV=%X/%X size=%X owner-vtable=%08X member=%X",
+        o.camera_set_transform_rva, o.camera_system_return_a_rva, o.camera_system_return_b_rva,
+        o.camera_horizontal_fov, o.camera_vertical_fov, g_discovery.camera_size,
+        g_discovery.camera_component_vtable, g_discovery.camera_component_member);
+    Log::Line("[build] loading=%08X client=%08X/%08X size=%X manager=%X/%08X size=%X session=%X state=%X idle=%d",
+        o.loading_screen_global_rva, o.matchmaking_client_global_rva, o.matchmaking_client_vtable_rva,
+        g_discovery.client_size, o.client_session_manager, o.session_manager_vtable_rva,
+        g_discovery.manager_size, o.session_manager_session, o.session_manager_state, g_discovery.session_idle);
+    return ProfileSelection::Matched;
 }
 
-}  // namespace rc_ht::builds
+}

@@ -7,7 +7,7 @@
 
 namespace rc_ht::builds {
 
-// Everything this mod pins to a specific `Roadcraft - Retail.exe` build.
+// Validated runtime addresses and member offsets.
 struct OffsetTable {
     // Camera::SetTransform(camera, position, up row, right row, forward row).
     // Writes the camera's world matrix and rebuilds its view, frustum planes and
@@ -56,23 +56,5 @@ struct BuildProfile {
     cameraunlock::memory::PeFingerprint Fingerprint;
     OffsetTable Offsets;
 };
-
-// A profile whose fingerprint routes but whose addresses are not derived yet
-// leaves the mod dormant.
-inline bool IsProfileComplete(const BuildProfile& p) {
-    const OffsetTable& o = p.Offsets;
-    return o.camera_set_transform_rva != 0
-        && o.camera_system_return_a_rva != 0
-        && o.camera_system_return_b_rva != 0
-        && o.camera_horizontal_fov != 0
-        && o.camera_vertical_fov != 0
-        && o.loading_screen_global_rva != 0
-        && o.matchmaking_client_global_rva != 0
-        && o.matchmaking_client_vtable_rva != 0
-        && o.client_session_manager != 0
-        && o.session_manager_vtable_rva != 0
-        && o.session_manager_session != 0
-        && o.session_manager_state != 0;
-}
 
 }  // namespace rc_ht::builds
